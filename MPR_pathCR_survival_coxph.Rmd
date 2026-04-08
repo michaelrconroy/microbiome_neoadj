@@ -1,0 +1,235 @@
+---
+title: "Pathologic response and survival"
+author: "Michael Conroy"
+date: "2024-09-24"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load_packages, include=FALSE}
+
+# loading relevant packages 
+
+library(ggplot2) 
+library(tidyr) 
+library(dplyr) 
+library(readxl) 
+library(ggpubr)
+library(rstatix)
+library(tidyverse)
+library(survival)
+library(survminer)
+library(gtsummary)
+library(webshot)
+library(car)
+library(contsurvplot)
+library(rlang)
+library(riskRegression)
+library(pammtools)
+library(gganimate)
+library(transformr)
+library(plotly)
+library(reshape2)
+library(knitr)
+library(rmarkdown)
+library(gt)
+library(kableExtra)
+
+```   
+
+```{r forming dataframe, include=FALSE}
+
+#set working directory
+setwd("S:/MolecularOncology/Users/Michael C/neoadjuvant microbiome/NGS results/microbiome_R_directory")
+
+#uploading source data
+alpha_survival <- read_excel("alpha_diversities_spaghetti.xlsx")
+
+
+
+```
+
+
+```{r first_specimens, include=FALSE}
+
+#creating subset with each patient's first stool specimen
+
+alpha_survival <- alpha_survival %>%
+  arrange(Record_ID,Days_from_IO_start)
+
+first_specimens <- alpha_survival %>%
+  group_by(Record_ID) %>%
+  slice(1) %>%
+  ungroup()
+
+# recoding as categorical variables
+
+first_specimens <- first_specimens %>%
+mutate(Sex = factor(Sex, levels = c(0, 1), labels = c("Female", "Male")))
+
+first_specimens <- first_specimens %>%
+mutate(MPR = factor(MPR, levels = c(0, 1), labels = c("No MPR present", "MPR present")))
+
+first_specimens <- first_specimens %>%
+mutate(PCR = factor(PCR, levels = c(0, 1), labels = c("No path CR present", "Path CR present")))
+
+first_specimens <- first_specimens %>%
+mutate(Tumor = factor(Tumor, levels = c(1, 2), labels = c("Adenocarcinoma", "Squamous cell carcinoma")))
+
+first_specimens <- first_specimens %>%
+mutate(smoking_status = factor(smoking_status, levels = c(0,1,2), labels = c("Never Smoker", "Ex-smoker","Current Smoker")))
+
+first_specimens <- first_specimens %>%
+  mutate(any_PDL = factor(any_PDL, levels = c(0,1,2,3), labels = c("Negative", "Low", "high", "unknown")))
+
+first_specimens <- first_specimens %>%
+  mutate(any_irae = factor(any_irae, levels = c(0,1), labels = c("No irAE", "Any irAE")))
+
+first_specimens <- first_specimens %>%
+  mutate(high_grade_irae = factor(high_grade_irae, levels = c(0,1), labels = c("No high-grade irae", "Any high-grade irae")))
+
+first_specimens$death <- ifelse(first_specimens$alive == 1, 0, 1)
+
+first_specimens$recurrence_free <- ifelse(first_specimens$recurrence_free == 1, 0, 1)
+
+names(first_specimens)[names(first_specimens) == "recurrence_free"] <- "recurrence"
+
+names(first_specimens)[names(first_specimens) == "PFS"] <- "RFS"
+
+```
+
+```{r MPR_OS, include=FALSE}
+
+# Creating a KM curve describing overall survival for those with and without MPR
+
+fit <- survfit(Surv(OS, death) ~ MPR, data = first_specimens)
+
+pdf("MPR_survival.pdf",width = 8, height = 6)
+par(mar = c(4,6,4,6)) 
+p1 <- ggsurvplot(fit, data = first_specimens, risk.table = TRUE, pval = TRUE,
+           xlab = "Time in months", ylab = "Survival Probability",
+           legend.title = "Survival by MPR status", legend.labs = c("MPR not present", "MPR present"),legend.size=8,font.ylab=list(size=12), tables.theme = theme_cleantable() + theme(text = element_text(size = 10))) 
+
+p1$plot <- p1$plot + theme(plot.margin = margin(t = 10, r = 10, b = 10, l = 75))
+
+print(p1)
+
+summary(fit)
+
+dev.off()
+
+```
+
+
+
+
+```{r PCR_OS, include=FALSE}
+
+# Creating a KM curve describing overall survival for those with and without PCR
+
+fit <- survfit(Surv(OS, death) ~ PCR, data = first_specimens)
+
+pdf("PCR_survival.pdf",width = 8, height = 6)
+par(mar = c(4,6,4,6)) 
+p2 <- ggsurvplot(fit, data = first_specimens, risk.table = TRUE, pval = TRUE,
+           xlab = "Time in months", ylab = "Survival Probability",
+           legend.title = "Survival by PCR status", legend.labs = c("PCR not present", "PCR present"),legend.size=8,font.ylab=list(size=12), tables.theme = theme_cleantable() + theme(text = element_text(size = 10)))
+
+p2$plot <- p2$plot + theme(plot.margin = margin(t = 10, r = 10, b = 10, l = 75))
+
+print(p2)
+
+dev.off()
+
+```
+
+```{r MPR_RFS, include=FALSE}
+
+# Creating a KM curve describing recurrence-free survival for those with and without MPR
+
+rfsfit <- survfit(Surv(RFS, recurrence) ~ MPR, data = first_specimens)
+
+pdf("MPR_RFS.pdf",width = 8, height = 6)
+par(mar = c(4,6,4,6)) 
+p1 <- ggsurvplot(rfsfit, data = first_specimens, risk.table = TRUE, pval = TRUE,
+           xlab = "Time in months", ylab = "Recurrence-free survival Probability",
+           legend.title = "Recurrence-free survival by MPR status", legend.labs = c("MPR not present", "MPR present"),legend.size=8,font.ylab=list(size=12), tables.theme = theme_cleantable() + theme(text = element_text(size = 10))) 
+
+p1$plot <- p1$plot + theme(plot.margin = margin(t = 10, r = 10, b = 10, l = 75))
+
+print(p1)
+
+summary(fit)
+
+dev.off()
+
+```
+  
+  
+  
+  
+```{r PCR_RFS, include=FALSE}
+
+# Creating a KM curve describing recurrence-free survival for those with and without PCR
+
+rfsfit <- survfit(Surv(RFS, recurrence) ~ PCR, data = first_specimens)
+
+pdf("PCR_RFS.pdf",width = 8, height = 6)
+par(mar = c(4,6,4,6)) 
+p2 <- ggsurvplot(rfsfit, data = first_specimens, risk.table = TRUE, pval = TRUE,
+           xlab = "Time in months", ylab = "Recurrence-free survival Probability",
+           legend.title = "Recurrence-free survival by PCR status", legend.labs = c("PCR not present", "PCR present"),legend.size=8,font.ylab=list(size=12), tables.theme = theme_cleantable() + theme(text = element_text(size = 10)))
+
+p2$plot <- p2$plot + theme(plot.margin = margin(t = 10, r = 10, b = 10, l = 75))
+
+print(p2)
+
+dev.off()
+
+```
+
+
+
+```{r comparing_MPR_RFS, include=FALSE}
+
+# logrank
+
+# RFS survival object
+fit_rfs <- survfit(Surv(RFS, recurrence) ~ MPR, data = first_specimens)
+
+# Log-rank test
+survdiff(Surv(RFS, recurrence) ~ MPR, data = first_specimens)
+
+#coxph
+
+cox_fit <- coxph(Surv(RFS, recurrence) ~ MPR, data = first_specimens)
+summary(cox_fit)
+
+
+```
+
+
+```{r follow up time}
+
+# Each patient's follow-up time
+first_specimens$followup <- first_specimens$RFS
+
+# Overall average follow-up
+mean(first_specimens$followup)
+sd(first_specimens$followup)
+
+
+first_specimens%>%
+  dplyr::summarise(
+    mean_followup = mean(followup),
+    sd_followup = sd(followup),
+    median_followup = median(followup),
+    n = n()
+  )
+
+
+```

@@ -1,0 +1,105 @@
+---
+title: "Neoadjuvant microbiome relative distribution"
+author: "Michael Conroy"
+date: "`r Sys.Date()`"
+output: html_document
+message: FALSE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.align = "center",
+                      fig.width = 10,
+                      fig.height = 7)
+
+setwd("S:/MolecularOncology/Users/Michael C/neoadjuvant microbiome/NGS results/microbiome_R_directory")
+```
+
+```{r load_packages, include=FALSE}
+library(ggplot2) 
+library(tidyr) 
+library(dplyr) 
+library(readxl) 
+library(ggpubr)
+library(rstatix)
+library(tidyverse)
+```
+
+## Relative distribution analysis 
+
+Exploring at baseline the relative distribution of the 10 most abundant families, categorized by MPR status.
+
+```{r reading data}
+top10family <- read_excel("top10familyMPR.xlsx")
+top10family$MPR <- as.factor(top10family$MPR)
+
+```
+
+```{r formatting, include=FALSE}
+names(top10family)[which(names(top10family) == "Relative abundance")] <- "relative_abundance"
+
+# adjusting the syntax of my uploaded excel file
+```
+
+### Scatter plot of relative distributions
+
+```{r}
+
+ggplot(top10family, aes(x = Species, y = abundance, fill = MPR)) + geom_boxplot() + geom_jitter(position = position_jitter(width = 0.3), size = 2, alpha = 0.5) + labs(x = "Species", y = "Relative Abundance", fill = "MPR") + theme_minimal() + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+### Exploring for significant differences within specific families
+
+```{r subgroups, include = FALSE}
+# selecting out the families to test for significant differences
+
+lachno_top10family <- top10family[top10family$Species=="Lachnospiraceae", ]
+lachno_abundance <- lachno_top10family$abundance
+
+bacteroid_top10family <- top10family[top10family$Species=="Bacteroidaceae", ]
+bacteroid_abundance <- bacteroid_top10family$abundance
+
+# testing for normality of distribution
+
+shapiro.test(lachno_abundance)
+shapiro.test(bacteroid_abundance)
+
+# testing for significance
+
+ t_test_lachno <- t.test(abundance ~ MPR, data=lachno_top10family)
+ t_test_bacteroid <- t.test(abundance ~ MPR, data=bacteroid_top10family)
+ 
+ p_lachno <- t_test_lachno$p.value
+ p_bacteroid <- t_test_bacteroid$p.value
+ 
+
+```
+
+```{r subgroup_graph}
+
+lachno_plot <- ggplot(lachno_top10family, aes(x = Species, y = abundance, fill = MPR)) + geom_boxplot() + geom_jitter(position = position_jitter(width = 0.3), size = 2, alpha = 0.5) + labs(x = "Species", y = "Relative Abundance", fill = "MPR") + theme_minimal() + theme(axis.text.x = element_text(hjust = 1, size = 12)) + theme(axis.title.x = element_text(margin = margin(t = 20), size = 14),axis.title.y = element_text(size = 14))
+
+bacteroid_plot <- ggplot(bacteroid_top10family, aes(x = Species, y = abundance, fill = MPR)) + geom_boxplot() + geom_jitter(position = position_jitter(width = 0.3), size = 2, alpha = 0.5) + labs(x = "Species", y = "Relative Abundance", fill = "MPR") + theme_minimal() + theme(axis.text.x = element_text(hjust = 1, size = 12)) + theme(axis.title.x = element_text(margin = margin(t = 20), size = 14),axis.title.y = element_text(size = 14))
+
+```
+
+```{r annotation_subgroup}
+lachno_plot_p <- lachno_plot + annotate("text", x=1.5, y = 80, label = paste("[ p =", round(p_lachno, 4), "]", sep = ""), 
+                  vjust = -1, size = 4)
+
+bacteroid_plot_p <- bacteroid_plot + annotate("text", x=1.5, y = 80, label = paste("[ p =", round(p_bacteroid, 4), "]", sep = ""), 
+                  vjust = -1, size = 4)
+
+```
+
+
+```{r plots}
+
+par(mfrow = c(1,2), mai=c(1, 1, 1, 20))
+
+lachno_plot_p
+
+bacteroid_plot_p
+
+```
+
