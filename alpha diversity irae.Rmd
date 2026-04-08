@@ -1,0 +1,148 @@
+---
+title: "Alpha diversity~irae"
+author: "Michael Conroy"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.align = "center",
+                      fig.width = 10,
+                      fig.height = 7)
+
+setwd("S:/MolecularOncology/Users/Michael C/neoadjuvant microbiome/NGS results/microbiome_R_directory")
+```
+
+```{r load_packages, include=FALSE}
+library(ggplot2) 
+library(tidyr) 
+library(dplyr) 
+library(readxl) 
+library(ggpubr)
+library(rstatix)
+library(tidyverse)
+```
+
+## The association between alpha diversity and outcomes
+
+Exploring the association between baseline alpha diversity and outcomes.
+
+```{r reading data}
+first_specs <- read_excel("first_specimens_only.xlsx")
+first_specs$MPR <- as.factor(first_specs$MPR)
+first_specs$alive_NED_24mo <- as.factor(first_specs$alive_NED_24mo)
+first_specs$prognostic_group <- as.factor(first_specs$prognostic_group)
+first_specs$any_irae <- as.factor(first_specs$any_irae)
+first_specs$high_grade_irae <- as.factor(first_specs$high_grade_irae)
+
+```
+
+## Alpha diversity and irae status
+
+
+```{r statistical testing,include=FALSE}
+
+# testing for normality of distribution
+
+shapiro.test(first_specs$simpson_reciprocal)
+
+shapiro.test(first_specs$simpson_reciprocal[first_specs$prognostic_group == 1])
+shapiro.test(first_specs$simpson_reciprocal[first_specs$prognostic_group == 2])
+shapiro.test(first_specs$simpson_reciprocal[first_specs$prognostic_group == 3])
+
+# testing for significant difference between groups
+
+t_test_simpson <- t.test(simpson_reciprocal~any_irae,data=first_specs)
+p_simpson <- t_test_simpson$p.value
+
+t_test_severe_simpson <- t.test(simpson_reciprocal~high_grade_irae,data=first_specs)
+p_severe_simpson <- t_test_severe_simpson$p.value
+
+t_test_shannon <- t.test(shannon~any_irae,data=first_specs)
+p_shannon <- t_test_shannon$p.value
+
+t_test_chao <- t.test(chao1~any_irae,data=first_specs)
+p_chao <- t_test_chao$p.value
+
+anova_simpson_prognostic <- aov(simpson_reciprocal ~ prognostic_group, data = first_specs)
+anova_summary <- summary(anova_simpson_prognostic)
+p_prognostic_simpson <- anova_summary[[1]][["Pr(>F)"]][1]
+
+```
+
+```{r medians, echo=FALSE}
+
+any_irae_1_set <- first_specs %>% filter(any_irae == "1")
+any_irae_0_set <- first_specs %>% filter(any_irae == "0")
+
+median_simpson_any_irae_1 <- median(any_irae_1_set$simpson_reciprocal, na.rm=TRUE)
+median_simpson_any_irae_0 <- median(any_irae_0_set$simpson_reciprocal, na.rm=TRUE)
+
+range_simpson_any_irae_1 <- range(any_irae_1_set$simpson_reciprocal)
+range_simpson_any_irae_0 <- range(any_irae_0_set$simpson_reciprocal)
+
+```
+
+
+```{r graph_simpson}
+
+simpson_plot <- ggplot(first_specs, aes(x = any_irae, y = simpson_reciprocal, fill = any_irae)) + geom_boxplot() + geom_jitter(position = position_jitter(width = 0.3), size = 2, alpha = 0.5) + labs(x = "any_irae", y = "Inverse Simpson", fill = "any_irae") + theme_minimal() + theme(axis.title.x = element_text(margin = margin(t = 20), size = 14),axis.title.y = element_text(size = 14)) + theme(
+  axis.line = element_line(color = "black", linewidth = 0.5)
+)
+
+simpson_plot_p <- simpson_plot + annotate("text", x=1.5, y = 30, label = paste("[ p =", round(p_simpson, 4), "]", sep = ""), 
+                  vjust = -1, size = 4)
+
+print(simpson_plot_p)
+
+ggsave("simpson_irae_boxplot.pdf", plot = simpson_plot_p, device = "pdf", width = 8, height = 6)
+
+```
+```{r graph_simpson}
+
+simpson_severe_plot <- ggplot(first_specs, aes(x = high_grade_irae, y = simpson_reciprocal, fill = high_grade_irae)) + geom_boxplot() + geom_jitter(position = position_jitter(width = 0.3), size = 2, alpha = 0.5) + labs(x = "high_grade_irae", y = "Inverse Simpson", fill = "high_grade_irae") + theme_minimal() + theme(axis.title.x = element_text(margin = margin(t = 20), size = 14),axis.title.y = element_text(size = 14)) + theme(
+  axis.line = element_line(color = "black", linewidth = 0.5)
+)
+
+simpson_severe_plot_p <- simpson_severe_plot + annotate("text", x=1.5, y = 30, label = paste("[ p =", round(p_severe_simpson, 4), "]", sep = ""), 
+                  vjust = -1, size = 4)
+
+print(simpson_severe_plot_p)
+
+ggsave("simpson_severe_irae_boxplot.pdf", plot = simpson_severe_plot_p, device = "pdf", width = 8, height = 6)
+
+```
+
+
+
+```{r graph_shannon}
+
+shannon_plot <- ggplot(first_specs, aes(x = MPR, y = shannon, fill = MPR)) + geom_boxplot() + geom_jitter(position = position_jitter(width = 0.3), size = 2, alpha = 0.5) + labs(x = "MPR", y = "shannon", fill = "MPR") + theme_minimal() + theme(axis.title.x = element_text(margin = margin(t = 20), size = 14),axis.title.y = element_text(size = 14)) + theme(
+  axis.line = element_line(color = "black", linewidth = 0.5)
+)
+
+shannon_plot_p <- shannon_plot + annotate("text", x=1.5, y = 8, label = paste("[ p =", round(p_shannon, 4), "]", sep = ""), 
+                  vjust = -1, size = 4)
+
+print(shannon_plot_p)
+
+ggsave("shannon_plot_p.pdf", plot = shannon_plot_p, device = "pdf", width = 8, height = 6)
+
+```
+
+```{r graph_chao}
+
+chao_plot <- ggplot(first_specs, aes(x = MPR, y = chao1, fill = MPR)) + geom_boxplot() + geom_jitter(position = position_jitter(width = 0.3), size = 2, alpha = 0.5) + labs(x = "MPR", y = "chao", fill = "MPR") + theme_minimal() + theme(axis.title.x = element_text(margin = margin(t = 20), size = 14),axis.title.y = element_text(size = 14)) + theme(
+  axis.line = element_line(color = "black", linewidth = 0.5)
+)
+
+chao_plot_p <- chao_plot + annotate("text", x=1.5, y = 100, label = paste("[ p =", round(p_chao, 4), "]", sep = ""), 
+                  vjust = -1, size = 4)
+
+print(chao_plot_p)
+
+ggsave("chao_plot_p.pdf", plot = chao_plot_p, device = "pdf", width = 8, height = 6)
+
+
+```
+

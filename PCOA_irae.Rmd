@@ -1,0 +1,233 @@
+---
+title: "PCOA_1_sample_sev_irAE"
+author: "Michael Conroy"
+date: "2024-07-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load_packages, include=FALSE}
+
+# loading relevant packages 
+
+library(ggplot2) 
+library(tidyr) 
+library(dplyr) 
+library(readxl) 
+library(ggpubr)
+library(rstatix)
+library(tidyverse)
+library(survival)
+library(survminer)
+library(RColorBrewer)
+library(grid)
+library(MASS)
+library("pheatmap")
+library(viridis)
+library(vegan)
+library(ape)
+library(Rtsne)
+library(umap)
+require(GGally)
+require(gtools)
+
+```   
+
+```{r forming dataframe}
+
+# setting working directory
+setwd("S:/MolecularOncology/Users/Michael C/neoadjuvant microbiome/NGS results/microbiome_R_directory")
+
+#folder for outputs
+analysisdir = "./analysis/sev_irAE/PCOA1spec/"
+
+
+
+```
+
+``` {r prepping data}
+# load meta-data from alpha diversity file
+meta <- read_excel("jhmi-neoadj-mbiom-2024.genus.xlsx", col_names = TRUE)
+
+#retain first specimen for each patient only
+
+meta <- meta %>%
+  group_by(Record_ID) %>%
+  arrange(Days_from_IO_start) %>%
+  slice_head(n = 1) %>%
+  ungroup()
+
+lastmdex = 29
+meta     = meta[,1:lastmdex]
+meta     = data.frame(meta)
+meta     = meta[1:(nrow(meta) - 1), ]
+
+# ---
+# critical VARS ---
+meta$study               = as.character(meta$study)
+meta$Record_ID           = as.character(meta$Record_ID)
+meta$prognostic_group    = factor(meta$prognostic_group, levels=c("1","2","3"))
+meta$Days_from_IO_start  = as.numeric(as.character(meta$Days_from_IO_start))
+meta$MPR                 = factor(meta$MPR, levels=c("0", "1"))
+meta$Response_6mo        = factor(meta$Response_6mo, levels=c("0", "1"))
+meta$percent_RVT         = factor(ifelse(as.numeric(gsub(">","",meta$percent_RVT)), "<=0.1", ">0.1"))
+meta$pretreatment_AJCC_stage = factor(meta$pretreatment_AJCC_stage)
+meta$Sex                 = factor(meta$Sex, levels=c("0", "1"))
+meta$smoking_status      = factor(meta$smoking_status)
+meta$age_enrollment      = as.numeric(as.character(meta$age_enrollment))
+meta$any_irae            = factor(meta$any_irae)
+meta$high_grade_irae     = factor(meta$high_grade_irae)
+meta$timept              = ifelse(meta$Days_from_IO_start < 1, "pre-tx", "on-tx")
+meta$timept              = factor(meta$timept , levels=c("pre-tx", "on-tx"))
+
+# BEGIN color scheme for major sample metadata features of interest ---------
+mycolors = c()
+
+mycolors$MPR["0"]   = "#ed5565"
+mycolors$MPR["1"]   = "#1ab394"
+
+mycolors$Response_6mo["0"]   = "#ec87c0"
+mycolors$Response_6mo["1"]   = "#48cfad"
+
+mycolors$percent_RVT["<=0.1"]  = "#4fc1e8"
+mycolors$percent_RVT[">0.1"]   = "#ffce54"
+
+mycolors$Sex["0"]   = "#ff9d9d"
+mycolors$Sex["1"]   = "#83c5df"
+
+mycolors$study["J1414"]   = "#b17eb8"
+mycolors$study["J1772"]   = "#e6cae9"
+
+mycolors$timept["pre-tx"] = "#ffc99b"
+mycolors$timept["on-tx"]  = "#ff8f31"
+
+mycolors$smoking_status["0"]  = "#cccccc"
+mycolors$smoking_status["1"]  = "#ffc36a"
+mycolors$smoking_status["2"]  = "#da9551"
+
+mycolors$any_irae["0"] = "#ced4da"
+mycolors$any_irae["1"] = "#fe5d94"
+
+mycolors$high_grade_irae["0"] = "#ced4da"
+mycolors$high_grade_irae["1"] = "#ff0054"
+
+mycolors$prognostic_group["1"] = "#1E90FF"
+mycolors$prognostic_group["2"] = "#FF34B3"
+mycolors$prognostic_group["3"] = "#00CD00"
+
+# END color scheme for major sample metadata features of interest ---------
+
+```
+
+
+``` {r custom_function}
+
+# begin custom function for PCoA analyses
+functionPCoA <- function(file, prefix){
+  print(paste("PCoA using distance metric: ", prefix, sep= ""))
+  
+  # load and refine distance matrix ------
+  bc.D <- read.table(file, header=TRUE, sep="\t", check.names=FALSE)
+  rownames(bc.D) = bc.D[,1]
+  bc.D           = bc.D[,-c(1)]
+  bc.D           = bc.D[rownames(bc.D) %in% meta[,1],  colnames(bc.D) %in% meta[,1] ]
+  # execute PCoA ------
+  bc.pcoa        = pcoa(bc.D)
+  # extract principal coordinates from PCoA results ------
+  bc.df          = data.frame(PC1 = bc.pcoa$vectors[,1], PC2 = bc.pcoa$vectors[,2], PC3 = bc.pcoa$vectors[,3])
+  # extract variance components from PCoA results ------
+  bc.Ax1PrctVar  = sprintf("%3.2f",100*bc.pcoa$values$Relative_eig[1])
+  bc.Ax2PrctVar  = sprintf("%3.2f",100*bc.pcoa$values$Relative_eig[2])
+  bc.Ax3PrctVar  = sprintf("%3.2f",100*bc.pcoa$values$Relative_eig[3])
+
+  bc.df          = cbind(meta[match(rownames(bc.df), meta[,1]),],bc.df)
+  bc.df$SampleID = as.character(bc.df$SampleID)
+
+  bc.df$study               = as.character(bc.df$study)
+  bc.df$Record_ID           = as.character(bc.df$Record_ID)
+  bc.df$prognostic_group    = factor(bc.df$prognostic_group, levels=c("1","2","3"))
+  bc.df$Days_from_IO_start  = as.numeric(as.character(bc.df$Days_from_IO_start))
+  bc.df$MPR                 = factor(bc.df$MPR, levels=c("0", "1"))
+  bc.df$Response_6mo        = factor(bc.df$Response_6mo, levels=c("0", "1"))
+  bc.df$percent_RVT         = factor(bc.df$percent_RVT)
+  bc.df$Sex                 = factor(bc.df$Sex, levels=c("0", "1"))
+  bc.df$smoking_status      = factor(bc.df$smoking_status)
+  bc.df$age_enrollment      = as.numeric(as.character(bc.df$age_enrollment))
+
+  bc.df$any_irae            = factor(bc.df$any_irae)
+  bc.df$high_grade_irae     = factor(bc.df$high_grade_irae)
+
+  bc.df$timept              = ifelse(bc.df$Days_from_IO_start < 1, "pre-tx", "on-tx")
+  bc.df$timept              = factor(bc.df$timept , levels=c("pre-tx", "on-tx"))
+
+  rownames(bc.df) = bc.df$SampleID
+
+  if (!identical(rownames(bc.df), rownames(bc.D))){
+    stop("bc.df and bc.D names don't match")
+  }
+
+  obc.df = bc.df
+  
+  # PERMANOVA analysis -----
+  
+  capture.output(adonis2(bc.D ~ any_irae,  data = obc.df, permutations = 1000), file=paste(analysisdir, prefix,".permanova-results.txt",sep=""), append=TRUE)
+  capture.output(adonis2(bc.D ~ high_grade_irae,  data = obc.df, permutations = 1000), file=paste(analysisdir, prefix,".permanova-results.txt",sep=""), append=TRUE)
+
+  # high-grade irAE
+  
+  centroids <- aggregate(cbind(PC1,PC2)~high_grade_irae, data=obc.df, mean)
+  bc.df     <- merge(obc.df,centroids,by="high_grade_irae",suffixes=c("",".centroid"))
+
+  # begin ggplot code for PCoA
+  p1 <- ggplot(bc.df, aes(x=PC1,y=PC2)) +
+  geom_point(data=centroids, aes(x=PC1,y=PC2, fill=high_grade_irae), pch=21, size=1) +
+   geom_segment(aes(x=PC1.centroid, y=PC2.centroid, xend=PC1, yend=PC2, color=high_grade_irae), alpha=0.5, show.legend=FALSE) +
+  geom_point(aes(fill=high_grade_irae, shape=study), color="black", size=4, alpha=0.7) +
+  scale_fill_manual(values=mycolors$high_grade_irae, labels = c("0" = "no severe irAE", "1" = "any severe irAE"))  +
+  scale_color_manual(values=mycolors$high_grade_irae) +
+  scale_shape_manual(values=c(23,21)) +
+  xlab(paste("PCoA Axis 1 (", bc.Ax1PrctVar, "% of Variation)", sep="")) +
+  ylab(paste("PCoA Axis 2 (", bc.Ax2PrctVar, "% of Variation)", sep="")) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        aspect.ratio=1) +
+  guides(fill = guide_legend(override.aes=list(shape=21)))
+  ggsave(paste(analysisdir, prefix,".pcoa.1.1.pdf",sep=""), p1, width=6.5, height=3.5)
+
+ p1 <- ggplot(bc.df, aes(x=PC1,y=PC2)) +
+  geom_path(aes(group=Record_ID, color=high_grade_irae), alpha=0.5, show.legend=FALSE) + 
+  geom_point(aes(fill=high_grade_irae, shape=timept), color="black", size=4, alpha=0.7) +
+  scale_fill_manual(values=mycolors$high_grade_irae, labels = c("0" = "no severe irAE", "1" = "any severe irAE"))  +
+  scale_color_manual(values=mycolors$high_grade_irae) +
+  scale_shape_manual(values=c(23,21)) +
+  xlab(paste("PCoA Axis 1 (", bc.Ax1PrctVar, "% of Variation)", sep="")) +
+  ylab(paste("PCoA Axis 2 (", bc.Ax2PrctVar, "% of Variation)", sep="")) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        aspect.ratio=1) +
+  guides(fill = guide_legend(override.aes=list(shape=21)))
+  ggsave(paste(analysisdir, prefix,".pcoa.1.2.pdf",sep=""), p1, width=6.5, height=3.5)
+
+}  
+```  
+
+
+
+
+``` {r running function}
+
+# run each file through this new function -----------------------------------------------------------
+functionPCoA(file="S:/MolecularOncology/Users/Michael C/neoadjuvant microbiome/NGS results/jhmi-neoadj-mbiom-2024.beta-diversity.bray_curtis.txt",        prefix = "bray-curtis")
+functionPCoA(file="S:/MolecularOncology/Users/Michael C/neoadjuvant microbiome/NGS results/jhmi-neoadj-mbiom-2024.beta-diversity.unweighted_unifrac.txt", prefix = "unweighted_unifrac")
+functionPCoA(file="S:/MolecularOncology/Users/Michael C/neoadjuvant microbiome/NGS results/jhmi-neoadj-mbiom-2024.beta-diversity.weighted_unifrac.txt", prefix = "weighted_unifrac")
+             
+```
+
+
+
+
