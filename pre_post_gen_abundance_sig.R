@@ -1,0 +1,75 @@
+rm(list=ls())
+
+# Define your list of packages
+packages <- c(
+  "RColorBrewer", "ggplot2", "grid", "MASS", "pheatmap", "viridis", "vegan", "ape",
+   "umap", "GGally", "gtools", "tidyr", "readxl", "ggpubr",
+  "rstatix", "tidyverse", "survival", "survminer", "tibble", "stringr", "dplyr"
+)
+
+# Install any packages that aren't already installed
+installed <- packages %in% rownames(installed.packages())
+if (any(!installed)) {
+  install.packages(packages[!installed])
+}
+
+# Load all packages
+lapply(packages, library, character.only = TRUE)
+
+## identifying which genera have statistically significant in abundance between the 'pre' and 'post' specimens
+
+# set the working directory as the location of the script ---
+setwd("S:/MolecularOncology/Users/Michael C/neoadjuvant microbiome/NGS results/microbiome_R_directory/indir/")
+A <- read.table("jhmi-neoadj-mbiom-2024.genus_pre_heatmap.txt", sep="\t", header=TRUE, check.names=FALSE, as.is=TRUE)
+B <- read.table("jhmi-neoadj-mbiom-2024.genus_post_heatmap.txt", sep="\t", header=TRUE, check.names=FALSE, as.is=TRUE)
+A$timepoint <- "before"
+B$timepoint <- "after"
+combined <- rbind(A, B)
+combined <- combined %>%
+  dplyr::select(SampleID, timepoint, everything())
+
+long_data <- combined %>%
+  pivot_longer(
+    cols = -(1:29),           # Exclude columns 1 to 28 (metadata columns)
+    names_to = "genus",       # New column for genus names
+    values_to = "abundance"   # New column for abundance values
+  )
+
+# Run paired Wilcoxon signed-rank tests for each genus, no adjustment
+results <- long_data %>%
+  group_by(genus) %>%
+  summarise(
+    median_before = median(abundance[timepoint == "before"]),
+    median_after  = median(abundance[timepoint == "after"]),
+    diff = median_after - median_before,
+    p_value = wilcox.test(
+      abundance[timepoint == "before"],
+      abundance[timepoint == "after"],
+      paired = TRUE
+    )$p.value,
+    .groups = "drop"
+  ) %>%
+  arrange(p_value)
+
+write.xlsx(results, "pre_post_genus_abundance.xlsx")
+
+# repeat the analysis but stratified by MPR status
+
+results_by_MPR <- long_data %>%
+  group_by(MPR, genus) %>%
+  summarise(
+    median_before = median(abundance[timepoint == "before"]),
+    median_after  = median(abundance[timepoint == "after"]),
+    diff = median_after - median_before,
+    p_value = wilcox.test(
+      abundance[timepoint == "before"],
+      abundance[timepoint == "after"],
+      paired = TRUE
+    )$p.value,
+    .groups = "drop"
+  ) %>%
+  arrange(MPR, p_value)
+
+
+library(writexl)
+write_xlsx(results_by_MPR, "MPR_prepost_heatmap_comparison_sig.xlsx")
