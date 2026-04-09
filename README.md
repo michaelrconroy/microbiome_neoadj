@@ -4,6 +4,6 @@ This is a codebase for a project investigating the relationship between the gut 
 
 Top-level directory: microbiome_R_2026/
 ./microbiome_R_2026/
-├── code                            <-- contains code for analysis
+
 
 
