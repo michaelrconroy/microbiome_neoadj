@@ -1,0 +1,119 @@
+rm(list=ls())
+
+# list of required packages
+packages <- c(
+  "RColorBrewer", "ggplot2", "grid", "MASS", "pheatmap", "viridis",
+  "dplyr", "readxl", "tidyverse", "tidyr", "purrr", "stringr"
+)
+
+# check which are not installed
+new_packages <- packages[!(packages %in% installed.packages()[,"Package"])]
+
+# install missing ones
+if(length(new_packages)) install.packages(new_packages)
+
+# load all
+lapply(packages, library, character.only = TRUE)
+
+
+## identifying which genera have the greatest difference in abundance, in baseline specimens, between those with subsequent ORR and those without subsequent ORR
+
+# set the working directory as the location of the script ---
+setwd("S:/MolecularOncology/Users/Michael C/neoadjuvant microbiome/NGS results/microbiome_R_directory/indir/")
+A <- read.table("jhmi-neoadj-mbiom-2024.genus_baseline.txt", sep="\t", header=TRUE, check.names=FALSE, as.is=TRUE)
+
+A <- A %>% 
+  dplyr::filter(!is.na(rad_response_preop))
+
+
+# rename MPR to orr
+names(A)[names(A) == "rad_response_preop"] <- "orr"
+
+# Recode 0 and 2 as "no rad response"; 1 as "rad response"
+A$orr <- ifelse(A$orr == 1,
+                "rad response",
+                ifelse(A$orr %in% c(0, 2),
+                       "no rad response",
+                       NA))  # keep any unexpected values as NA
+
+# Convert to factor with desired ordering
+A$orr <- factor(A$orr,
+                levels = c("no rad response", "rad response"))
+
+colnames(A)[29:ncol(A)] <-
+  str_extract(colnames(A)[29:ncol(A)], "(?<=g_)[^.;]+") |> 
+  make.unique(sep = "_")
+
+# Identify genus columns (assuming they start from column X onward)
+genus_cols <- names(A)[which(names(A) == "Ilumatobacter"):ncol(A)]  
+
+results <- data.frame(
+  genus = genus_cols,
+  p_value = sapply(genus_cols, function(genus) {
+    wilcox.test(A[[genus]] ~ A$orr)$p.value
+  }),
+  median_no_response = sapply(genus_cols, function(genus) {
+    median(A[[genus]][A$orr == "no rad response"], na.rm = TRUE)
+  }),
+  median_response = sapply(genus_cols, function(genus) {
+    median(A[[genus]][A$orr == "rad response"], na.rm = TRUE)
+  })
+) %>%
+  mutate(direction = ifelse(
+    median_response > median_no_response,
+    "higher in responders",
+    "higher in non-responders"
+  )) %>%
+  arrange(p_value)   # sort by p-value ascending
+
+
+# filter to significant genera and remove unwanted ones
+sig_genera <- results %>%
+  filter(p_value < 0.05) %>%
+  pull(genus) %>%
+  setdiff(c("unassigned_17", "unassigned_28"))
+
+# reshape to long format for plotting
+plot_data <- A %>%
+  dplyr::select(orr, dplyr::all_of(sig_genera)) %>%
+  tidyr::pivot_longer(
+    cols = -orr,
+    names_to = "genus",
+    values_to = "abundance"
+  )
+
+# create a data frame for p-value annotations
+pvals_df <- results %>%
+  filter(genus %in% sig_genera) %>%
+  mutate(
+    label = paste0("p = ", signif(p_value, 3)),
+    y_pos = sapply(genus, function(g) max(A[[g]], na.rm = TRUE) * 1.05)
+  ) %>%
+  dplyr::select(genus, label, y_pos)
+
+# boxplot with p-values
+p <- ggplot(plot_data, aes(x = orr, y = abundance, fill = orr)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.7) +
+  geom_jitter(width = 0.2, alpha = 0.6) +
+  facet_wrap(~ genus, scales = "free_y") +
+  scale_fill_manual(values = c("no rad response" = "grey70",
+                               "rad response" = "#0072FF")) +
+  geom_text(data = pvals_df, aes(x = 1.5, y = y_pos, label = label), inherit.aes = FALSE) +
+  theme_bw(base_size = 14) +
+  labs(
+    x = "Response status",
+    y = "Relative abundance",
+    fill="Response status",
+  ) +
+  theme(
+    strip.text = element_text(face = "bold"),
+    legend.position = "right",
+  )
+
+ggsave(
+  filename = "baseline_genera_ORR_boxplots.pdf",
+  plot = p,
+  path = "S:/MolecularOncology/Users/Michael C/neoadjuvant microbiome/NGS results/microbiome_R_directory",
+  width = 10,
+  height = 6
+)
