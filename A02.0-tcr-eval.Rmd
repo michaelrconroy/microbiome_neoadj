@@ -1,0 +1,322 @@
+---
+title:  "TCR Analysis Report<br>Conroy | Naidoo"
+date:   "`r paste0('Date: ', format(Sys.time(), '%Y-%m-%d %X %Z'))`"
+author: "Prepared by James Robert White, PhD (Resphera Biosciences)" 
+output:
+  html_document:
+    theme: default
+    highlight: default
+    toc: true
+    toc_depth: 3
+    collapse: subsubsection
+    number_sections: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+---
+<style type="text/css">
+.list-group-item.active {
+  color: white;
+  background-color: #1A2188;
+  border: none;
+}
+.list-group-item:hover,
+.list-group-item.active:hover {
+    color: white;
+    background-color: #1A2188;
+}
+.title{
+  color: #1A2188;
+}
+.author{
+  color: #3A5CE9;
+}
+.date{
+  color: #4a4e69;
+}
+h1 {
+  font-size: 28px;
+}
+h2 {
+  font-size: 26px;
+}
+h3 {
+  font-size: 24px;
+}
+h4 {
+  font-size: 20px;
+}
+</style>
+
+
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE)
+library(caret)
+library(DescTools)
+library(dplyr)
+library(DT)
+library(table1)
+library(egg)
+library(ggplot2)
+library(ggpubr)
+library(ggrepel)
+library(grid)
+library(pROC)
+library(ROCR)
+library(randomForest)
+library(reshape2)
+library(stringr) 
+library(scales)
+
+# ---
+# to run:
+# setwd("~/Desktop/jhmi-neoadj-mbiom-2024/code")
+# library(rmarkdown)
+# render("A02.0-tcr-eval.Rmd")
+
+# --
+# manual options
+setwd("~/Desktop/jhmi-neoadj-mbiom-2024/code")
+# ---
+# name output directory
+script_prefix = "A02.0-tcr-eval"
+# ---
+# create output directory, overwrite if needed
+output_dir = paste("../analysis/", script_prefix, sep="")
+unlink(output_dir, recursive=TRUE)
+dir.create(output_dir)
+
+# ---
+# store results
+my_fig_list      = list()
+my_stat_list     = list()
+my_table_list    = list()
+my_by_level_list = list()
+
+files  = c("jhmi-neoadj-mbiom-2024.alpha-diversity.txt",
+           "jhmi-neoadj-mbiom-2024.phylum.txt",
+           "jhmi-neoadj-mbiom-2024.class.txt",
+           "jhmi-neoadj-mbiom-2024.order.txt",
+           "jhmi-neoadj-mbiom-2024.family.txt",
+           "jhmi-neoadj-mbiom-2024.genus.txt",
+           "jhmi-neoadj-mbiom-2024.picrust.txt",
+           "jhmi-neoadj-mbiom-2024.picrust2.pw.txt")
+
+# --
+# data files
+
+flx_table_1 = c()
+flx_table_2 = c()
+
+for (fi in files){
+  lvl = gsub(".pw", "", gsub("-", " ", gsub(".avgGTE0.01Prct", "", gsub(".txt", "", gsub("jhmi-neoadj-mbiom-2024.", "", fi)))))
+  print(lvl)
+
+
+  fi_df = read.table(paste0("../analysis/A02.0-add-metadata/", fi), header=TRUE, sep="\t", check.names=FALSE)
+
+  # drop non tcr samples
+  fi_df = fi_df[fi_df$TCRseq==1,]
+
+  # remove all zero columns
+  keep_set = colnames(fi_df[,26:ncol(fi_df)])[colSums(fi_df[,26:ncol(fi_df)]) > 0]
+  fi_df    = fi_df[,c(colnames(fi_df)[1:25], keep_set)]
+  # drop timepoints before 90 days
+  fi_df    = fi_df[fi_df$`days from start` <= 90,]
+  # fi_df[,2] = cut(fi_df$`days from start`, breaks=c(-10, 90, Inf))
+  # colnames(fi_df)[2] = "time"
+  
+  fi_features = colnames(fi_df)[26:ncol(fi_df)] 
+  targets = c("total productive reads", "max productive freq", "total clonotypes", "clonality")
+  
+  for (j in targets){
+    fi_df[,j] = as.numeric(as.character(fi_df[,j]))
+  }  
+  for (j in fi_features){
+    fi_df[,j] = as.numeric(as.character(fi_df[,j]))
+  }  
+
+  stats_df = c()
+
+  for (fif in fi_features){
+    # evaluate each target column for this feature
+    # get spearman and pearson correlation
+    # with p-values
+    
+    for (trg in targets){
+      fif_row = c(lvl, fif)
+      sp.cor = cor.test(fi_df[,trg], fi_df[,fif], method="spearman")
+      pr.cor = cor.test(fi_df[,trg], fi_df[,fif], method="pearson")
+      fif_row = c(fif_row, trg, sp.cor$estimate, sp.cor$p.value, 
+                           pr.cor$estimate, pr.cor$p.value)
+
+      stats_df = rbind(stats_df, fif_row)
+  
+    }
+  }
+
+  colnames(stats_df) = c("level", "feature", "tcr measure", "spearman est", "sp pval", "pearson est", "pr pval") 
+  stats_df = data.frame(stats_df, check.names=FALSE)
+  for (j in 4:7){
+    stats_df[,j] = round(as.numeric(stats_df[,j]), digits=4)
+    stats_df[is.na(stats_df[,j]),j] = "n/a"
+  }
+   
+  my_by_level_list[[paste0(lvl, " stats")]]  <- datatable(data = stats_df, 
+                                                        class      = 'cell-border stripe', 
+                                                        rownames   = F, 
+                                                        extensions = "Buttons", 
+                                                        filter     = "top",
+                                                        options    = list(paging    = TRUE,
+                                                                          scrollX   = TRUE,
+                                                                          searching = TRUE,  
+                                                                          dom = 'Bfrtip',
+                                                                          buttons = c('copy', 'csv', 'excel'),
+                                                                          pageLength = 10)) 
+
+
+  if (grepl("alpha", lvl)){ 
+
+    flx_table_1 <- datatable(data = unique(fi_df[,c("pid", "histology", "stage", "sex", "age", "MPR", "smk", "tx_type", "percent_RVT", targets)]), 
+                            class      = 'cell-border stripe', 
+                            rownames   = F, 
+                             filter     = "top",
+                            extensions = "Buttons", 
+                            options    = list(paging    = TRUE,
+                                              scrollX   = TRUE,
+                                              searching = TRUE,  
+                                              dom = 'Bfrtip',
+                                              buttons = c('copy', 'csv', 'excel'),
+                                              pageLength = 20)) 
+
+     flx_table_2 <- datatable(data = unique(fi_df[,c("pid", "days from start", "histology", "stage", "sex", "age", "MPR", "smk", "tx_type", "percent_RVT", targets)]), 
+                            class      = 'cell-border stripe', 
+                            rownames   = F, 
+                             filter     = "top",
+                            extensions = "Buttons", 
+                            options    = list(paging    = TRUE,
+                                              scrollX   = TRUE,
+                                              searching = TRUE,  
+                                              dom = 'Bfrtip',
+                                              buttons = c('copy', 'csv', 'excel'),
+                                              pageLength = 20)) 
+    
+  }
+
+
+}
+
+
+
+
+
+```
+
+# Purpose
+The purpose of this report is to provide a preliminary data description and 
+analysis of TCR feature values related to microbiome profiles (taxonomic and 
+functional) associated with the neoadjuvant cohort.
+
+# Scope
+This analysis covers the following target TCR variables:
+
+* Total Productive Reads
+* Max Productive Freq
+* Total Clonotypes
+* Clonality
+
+and their associations with the following microbiome levels:
+
+* Alpha diversity
+* Phylum
+* Class
+* Order
+* Family
+* Genus
+* PICRUST v1
+* PICRUST v2
+
+
+# Source Files
+Primary resources used in this analysis:
+
+* `Sequencing Data\2023 Lung neoadj-meso samples\TCRseq` Sears lab server
+* `jhmi-neoadj-mbiom-2024` Resphera managed microbiome analysis repository
+
+# Dataset for Analysis
+Below is a summary of the subject IDs and their metadata. Samples without TCR measures 
+and timepoints longer than 90 days have been removed.
+
+```{r echo=FALSE, warning=FALSE}
+  flx_table_1
+```
+
+Below is a summary of the timepoints per subject ID analyzed.
+
+```{r echo=FALSE, warning=FALSE}
+  flx_table_2
+```
+
+
+# Results
+
+## Results by Level
+
+Below for each level we display the primary statistical analysis results
+comparing TCR measures and microbiome features using 
+
+1. Spearman correlation
+2. Pearson correlation
+
+```{r echo=FALSE, warning=FALSE, fig.width=8.5, fig.height=7.5, fig.align='center', results="asis"}
+  for (analyte in names(my_by_level_list)){ 
+    cat("\n") 
+    cat("\n") 
+
+
+    cat("###", str_to_title(analyte), "\n\n")
+  
+    print(htmltools::tagList(my_by_level_list[[analyte]]))
+
+    cat("<br>\n") 
+    cat("<br>\n") 
+    cat("<br>\n") 
+
+    cat("<br>\n") 
+    cat("<br>\n") 
+    cat("<br>\n") 
+
+    cat("<br>\n") 
+    cat("<br>\n") 
+    cat("<br>\n") 
+
+    cat("<br>\n") 
+    cat("<br>\n") 
+    cat("<br>\n") 
+
+    cat("<br>\n") 
+    cat("<br>\n") 
+    cat("<br>\n") 
+
+    cat("<br>\n") 
+    cat("<br>\n") 
+    cat("<br>\n") 
+
+    cat("<br>\n") 
+    cat("<br>\n") 
+    cat("<br>\n") 
+
+    cat("<br>\n") 
+    cat("<br>\n") 
+    cat("<br>\n") 
+
+
+    cat("\n") 
+    cat("\n") 
+    cat("\n") 
+    cat("\n") 
+  } 
+```
+
+
+# End of Document
